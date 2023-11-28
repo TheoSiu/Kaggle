@@ -1,0 +1,83 @@
+import csv
+import pandas as pd
+import numpy as np
+import tensorflow as tf
+from tensorflow import keras
+from keras.utils import to_categorical
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from keras.layers import Conv2D, MaxPooling2D, Flatten, Dense
+import tensorflow as tf
+from tensorflow import keras
+from keras.layers import Dense
+from keras.layers import Dropout
+from keras.models import Sequential
+from keras.optimizers import Adam
+from keras.losses import categorical_crossentropy
+from keras.preprocessing.image import ImageDataGenerator
+from keras.callbacks import ReduceLROnPlateau
+
+train= pd.read_csv('/kaggle/input/Kannada-MNIST/train.csv')
+test= pd.read_csv('/kaggle/input/Kannada-MNIST/test.csv')
+sample_submission= pd.read_csv('/kaggle/input/Kannada-MNIST/sample_submission.csv')
+x_train, x_test, y_train, y_test= train_test_split(train.iloc[:, 1:], train.iloc[:, 0], test_size=0.3, random_state=101)
+standardScaler = StandardScaler()
+standardScaler.fit(x_train)
+x_train = standardScaler.transform(x_train)
+x_test = standardScaler.transform(x_test)
+y_train = to_categorical(y_train, 10)
+y_test = to_categorical(y_test, 10)
+
+### 將訓練與測試集的資料reshape為三維的陣列 ###
+x_train= x_train.reshape(-1, 28, 28, 1)
+x_test= x_test.reshape(-1, 28, 28, 1)
+test = standardScaler.transform(test.iloc[:, 1:])
+test= test.reshape(-1, 28, 28, 1)
+
+### bulid CNN model ###
+# Conv2D(32, (3,3)) 共有32個filters，尺寸為3x3，每個fiter的參數都不同，檢測pattern ->輸出32個chanels
+# MaxPooling2D(2,2) 將每個filter所得到的數字，分成一組大小為(2x2)，取(2x2)中的最大值為代表, input(4x4)-> output(2x2)縮小圖片
+# Conv2D抓取細微特徵， MaxPooling2D主要是減少運算量，但可能忽略細節，降低Performance
+# padding: 'same' 當框框超出圖像範圍，補值0
+cnn= Sequential()
+cnn.add(Conv2D(32, (3,3), activation= 'relu', input_shape= (28, 28, 1), padding="same"))
+cnn.add(Conv2D(32, (3,3), activation= 'relu', padding="same"))
+cnn.add(MaxPooling2D(pool_size= (2,2), padding="same"))
+cnn.add(Dropout(0.25))
+cnn.add(Conv2D(64, (3, 3), activation= 'relu', padding="same"))
+cnn.add(Conv2D(64, (3, 3), activation= 'relu', padding="same"))
+cnn.add(MaxPooling2D(pool_size= (2,2), padding="same"))
+cnn.add(Dropout(0.25))
+
+cnn.add(Flatten())
+cnn.add(Dense(128, activation="relu"))
+cnn.add(Dropout(0.5))
+cnn.add(Dense(10, activation="softmax"))
+cnn.compile(optimizer="Adam", loss="categorical_crossentropy", metrics=["accuracy"])
+cnn.summary()
+cnn.fit(x_train, y_train, batch_size=50 ,epochs=4, validation_data=(x_test, y_test))
+
+### 將圖像轉換以及學習率調整加入到CNN模型之中
+learning_rate_reduction = ReduceLROnPlateau(monitor='val_acc', ###監視的性能指標
+                                            patience=3,  ### 在幾個epoch內，若性能無改善，將調低學習率
+                                            verbose=1, ### 是否輸出學習率調整的信息 0表示不輸出
+                                            factor=0.5,  ### 學習率乘以factor，即為下次的學習率
+                                            min_lr=0.00001) ### 學習率的下限
+
+
+datagen = ImageDataGenerator(
+    featurewise_center=True,
+    featurewise_std_normalization=True,
+    rotation_range=20,    ### 隨機旋轉角度[-20度, 20度]
+    width_shift_range=0.2, ### 隨機水平平移比例 [-20%, 20%]
+    height_shift_range=0.2, ### 隨機垂直平移比例 [-20%, 20%]
+    horizontal_flip=True) ### 隨機水平翻轉
+datagen.fit(x_train)
+cnn.fit(datagen.flow(x_train, y_train, batch_size=32), 
+                  steps_per_epoch=len(x_train)/32,validation_data=(x_test, y_test),
+                  epochs=30, callbacks=[learning_rate_reduction])
+
+pred = cnn.predict(test)
+pred_lab = np.argmax(pred, axis=1)
+sample_submission['label']= np.argmax(pred, axis= 1)
+sample_submission.to_csv('submission.csv', index= False)
