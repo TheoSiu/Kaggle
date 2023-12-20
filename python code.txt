@@ -1,0 +1,289 @@
+iimport numpy as np
+import pandas as pd
+import csv
+from datetime import datetime
+import calendar
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import r2_score
+from sklearn.metrics import mean_squared_error
+from sklearn.model_selection import GridSearchCV
+from sklearn.tree import DecisionTreeClassifier
+import xgboost as xgb
+import seaborn as sns
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import r2_score
+from sklearn.metrics import mean_squared_error
+from sklearn.model_selection import GridSearchCV
+from sklearn.model_selection import cross_val_score
+from sklearn.feature_selection import SelectFromModel
+from sklearn.linear_model import LassoCV
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import learning_curve
+from xgboost import plot_importance
+  
+train= pd.read_csv('/Users/siuuu/Downloads/bike-sharing-demand/train.csv')
+test= pd.read_csv('/Users/siuuu/Downloads/bike-sharing-demand/test.csv')
+sub= pd.read_csv('/Users/siuuu/Downloads/bike-sharing-demand/sampleSubmission.csv')
+# train.head()
+# info()可查看是否有缺失值
+train['datetime'].head()
+train.info()
+
+# 將datetime的日期與時間split成不同column
+train['year']= train['datetime'].apply(lambda x: x.split()[0].split('-')[0])
+train['month']= train['datetime'].apply(lambda x: x.split()[0].split('-')[1])
+train['day']= train['datetime'].apply(lambda x: x.split()[0].split('-')[2])
+train['hour']= train['datetime'].apply(lambda x: x.split()[1].split(':')[0])
+
+# 將datetime的日期與時間split成不同column
+train['date']= train['datetime'].apply(lambda x : x.split()[0])
+train['year']= train['datetime'].apply(lambda x: x.split()[0].split('-')[0])
+train['month']= train['datetime'].apply(lambda x: x.split()[0].split('-')[1])
+train['day']= train['datetime'].apply(lambda x: x.split()[0].split('-')[2])
+train['hour']= train['datetime'].apply(lambda x: x.split()[1].split(':')[0])
+
+# 將日期轉為星期幾, 將季節與天氣的數字轉為字串(from number to letters)
+from datetime import datetime
+import calendar
+# datetime.today().strftime('%A')
+train['weekday']= train['date'].apply(lambda x: calendar.day_name[datetime.strptime(x,'%Y-%m-%d').weekday()])
+train['season']= train['season'].map({1:'Spring', 
+                                      2:'Summer', 
+                                      3:'Fall', 
+                                      4:'Winter'})
+train['weather']= train['weather'].map({1: 'Clear',
+                                         2: 'Mist, Few clouds',
+                                         3: 'Light Snow, Rain, Thunderstorm',
+                                         4: 'Heavy Rain, Thunderstorm, Snow, Fog'})
+
+# 查看特徵欄位與應變數Y的關係
+mpl.rc('font', size=11)                       
+mpl.rc('axes', titlesize=15) 
+figure, axes = plt.subplots(nrows=2, ncols=2)
+plt.tight_layout()                            
+figure.set_size_inches(10, 9)                 
+
+sns.barplot(x='year', y='count', data=train, ax=axes[0, 0])
+sns.barplot(x='month', y= 'count', data=train, ax=axes[0,1])
+sns.barplot(x='day', y= 'count', data= train, ax=axes[1,0])
+sns.barplot(x='hour', y= 'count', data=train, ax= axes[1,1])
+
+# boxplot 可以看出每個類別數值的分散程度
+# 分別由Min(最小值), Q1(25%), Q2(中位數), Q3(75%), Max(最大值)
+# IQR＝ Q3-Q1, Min值= Q1-1.5*IQR//Max值= Q3+ 1.5IQR
+figure, axes= plt.subplots(nrows= 2, ncols= 2)
+plt.tight_layout()
+figure.set_size_inches(10, 13)
+sns.boxplot(x='season', y= 'count', data=train, ax= axes[0,0])
+sns.boxplot(x='weather', y= 'count', data=train, ax= axes[0,1])
+sns.boxplot(x= 'holiday', y= 'count', data=train, ax= axes[1,0])
+sns.boxplot(x= 'workingday', y= 'count', data=train, ax= axes[1,1])
+axes[0, 1].tick_params(axis='x', labelrotation=10)
+
+# pointplot 可以更好比較每個類別的出租量
+figure, axes= plt.subplots(nrows= 5)
+figure.set_size_inches(12, 18)
+sns.pointplot(x= 'hour', y= 'count', data=train, hue= 'workingday',ax=axes[0])
+sns.pointplot(x = 'hour', y = 'count', data = train, hue = 'holiday', ax = axes[1])
+sns.pointplot(x = 'hour', y = 'count', data = train, hue = 'weekday', ax = axes[2])
+sns.pointplot(x = 'hour', y = 'count', data = train, hue = 'season', ax = axes[3])
+sns.pointplot(x = 'hour', y = 'count', data = train, hue = 'weather', ax = axes[4])
+
+# regplot 線性回歸點狀圖
+# mpl.rc 調整X與Y軸的字體大小
+# tight_layout 可以調整每張圖各自的距離，不會互相擋住X、Y軸的字體
+# size_inches 調整每張圖的大小
+# scatter_kws 調整point顏色的深淺
+# line_kws 調整直線的參數，包括顏色等等
+mpl.rc('font', size = 15)
+figure, axes = plt.subplots(nrows = 2, ncols = 2)
+plt.tight_layout()
+figure.set_size_inches(7, 6)
+sns.regplot(x = 'temp', y = 'count', data = train, ax = axes[0, 0],
+            scatter_kws = {'alpha': 0.3}, line_kws = {'color': 'blue'})
+sns.regplot(x = 'atemp', y = 'count', data = train, ax = axes[0, 1],
+           scatter_kws = {'alpha': 0.3}, line_kws = {'color': 'blue'})
+sns.regplot(x = 'windspeed', y = 'count', data = train, ax = axes[1, 0],
+           scatter_kws = {'alpha': 0.3}, line_kws = {'color': 'blue'})
+sns.regplot(x = 'humidity', y = 'count', data = train, ax = axes[1, 1],
+           scatter_kws = {'alpha': 0.3}, line_kws = {'color': 'blue'})
+  
+# corr() 可計算出各特徵的交互關係
+# 數值大於0 表示正相關, 最大為1
+train[['temp', 'atemp', 'windspeed', 'humidity','count']].corr()
+
+# 用圖型視覺化的方式，更好的判斷哪些特徵有更強烈的交互關係
+# heatmap(annot=True 可以顯示CF因子)
+corrMat= train[['temp', 'atemp', 'windspeed', 'humidity','count']].corr()
+sns.heatmap(corrMat, annot = True)
+
+
+train= pd.read_csv('/Users/siuuu/Downloads/bike-sharing-demand/train.csv')
+train['year']= train['datetime'].apply(lambda x: x.split()[0].split('-')[0])
+train['month']= train['datetime'].apply(lambda x: x.split()[0].split('-')[1])
+# train['day']= train['datetime'].apply(lambda x: x.split()[0].split('-')[2])
+train['hour']= train['datetime'].apply(lambda x: x.split()[1].split(':')[0])
+train.drop(['datetime', 'windspeed', 'casual', 'registered'], axis= 1, inplace=True)
+
+train['season']= train['season'].map({1:'Spring', 2:'Summer', 3:'Fall', 4:'Winter'})
+train['weather']= train['weather'].map({1: 'Clear', 2: 'Mist, Few clouds',
+                                         3: 'Light Snow, Rain, Thunderstorm',
+                                         4: 'Heavy Rain, Thunderstorm, Snow, Fog'})
+
+# 清除數值欄位['temp', 'atemp','humidity']的異常值outliers, 並reset rows index                                     
+def iqr(df):
+    iqr= df.quantile(0.75)- df.quantile(0.25)
+    upper, lower= df.quantile(0.75)+(1.5* iqr), df.quantile(0.25)-(1.5* iqr)
+    x= df[(df< lower) | (df> upper)].index.tolist()
+    return x
+# train_num.drop(iqr(train_num['temp']), axis= 0, inplace= True) 
+# train_num.drop(iqr(train_num['atemp']), axis= 0, inplace= True) 
+train.drop(iqr(train['humidity']), axis= 0, inplace= True) 
+train.reset_index(drop= True, inplace= True)
+print(train.shape)
+
+# 將資料欄位分成數值與類別兩組
+num_features = [feature for feature in train.columns if train.dtypes[feature] != "object"]
+str_features= [ feature for feature in train.columns if train.dtypes[feature] == 'object']
+train_num = train[num_features]#.copy()
+train_cate = train[str_features]#.copy()
+# print(train_num.shape)
+# 將類別欄位用One Hot編碼
+train_cate_dummies = pd.get_dummies(train_cate)
+train_cate_dummies.columns
+
+# 將數值欄位標準化
+scaler = StandardScaler()
+train_num_scaled = scaler.fit_transform(train_num.iloc[:, 2:-1]) # 略過欄位 holiday & workingday
+train_num_scaled = pd.DataFrame(train_num_scaled, columns=train_num.columns[2:-1])
+# print(train_num_scaled.shape)
+
+# 準備訓練集資料
+x_train = pd.concat([train_num_scaled, train_num.iloc[:, 0:2], train_cate_dummies], axis=1)
+y_train= train_num['count'].apply(lambda x: np.log1p(x)) # 將要預測的欄位'count'做log轉換
+# x_train.shape, y_train.shape
+print(x_train.shape, y_train.shape)
+# 刪除沒相關的特徵欄位
+# Lasso 為L1正則化，使某些特徵對模型的影響力歸零，達到特徵選擇的目的(菱形的角，會有一個軸為0)
+# Ridge 為L2正則化，會降低特徵對模型的影響力減弱，但不會歸零(圓形會使軸的值皆不為零)
+lasso = LassoCV()
+lasso.fit(x_train, y_train)
+model = SelectFromModel(lasso, prefit=True)
+x_train_new= model.transform(x_train.values)
+# print(x_train_new.shape)
+# print("特徵選擇標記：", model.get_support())
+x_train, x_test, y_train, y_test = train_test_split(x_train_new, y_train, test_size=0.3, random_state=101) #random_state 使測試結果可重複
+# x_train, x_test, y_train, y_test = train_test_split(x_train, y_train, test_size=0.3, random_state=101) #random_state 使測試結果可重複
+
+# 處理測試資料
+test= pd.read_csv('/Users/siuuu/Downloads/bike-sharing-demand/test.csv')
+test['year']= test['datetime'].apply(lambda x: x.split()[0].split('-')[0])
+test['month']= test['datetime'].apply(lambda x: x.split()[0].split('-')[1])
+test['day']= test['datetime'].apply(lambda x: x.split()[0].split('-')[2])
+test['hour']= test['datetime'].apply(lambda x: x.split()[1].split(':')[0])
+test.drop(['datetime', 'windspeed'], axis= 1, inplace=True)
+
+test['season']= test['season'].map({1:'Spring', 2:'Summer', 3:'Fall', 4:'Winter'})
+test['weather']= test['weather'].map({1: 'Clear', 2: 'Mist, Few clouds',
+                                         3: 'Light Snow, Rain, Thunderstorm',
+                                         4: 'Heavy Rain, Thunderstorm, Snow, Fog'})
+
+# 將資料欄位分成數值與類別兩組
+num_features = [feature for feature in test.columns if test.dtypes[feature] != "object"]
+str_features= [ feature for feature in test.columns if test.dtypes[feature] == 'object']
+test_num = test[num_features].copy()
+test_cate = test[str_features].copy()
+
+# 將類別欄位用One Hot編碼
+test_cate_dummies = pd.get_dummies(test_cate)
+
+# 將數值欄位標準化 
+scaler = StandardScaler()
+test_num_scaled = scaler.fit_transform(test_num.iloc[:, 2:]) # 略過欄位 holiday & workingday
+test_num_scaled = pd.DataFrame(test_num_scaled, columns=test_num.columns[2:])
+
+# 將train與test的特徵欄位統一
+for x in train_cate_dummies.columns:
+    if x not in test_cate_dummies:
+        test_cate_dummies[x]= 0
+
+for x in test_cate_dummies.columns:
+    if x not in train_cate_dummies:
+        test_cate_dummies.drop(x, axis= 1, inplace= True)
+test_pre= pd.concat([test_num_scaled, test_num.iloc[:,0:2], test_cate_dummies], axis=1)
+  
+# 對測試集做相同的特徵選擇
+test_pre = model.transform(test_pre.values)
+# print(test_pre.shape)
+
+# train_sizes, train_scores, test_scores = learning_curve(RandomForestRegressor(), x_train, y_train, cv=10, n_jobs=-1, train_sizes=np.linspace(0.01, 1.0, 50))
+# train_mean = np.mean(train_scores, axis=1)
+# train_std = np.std(train_scores, axis=1)
+# test_mean = np.mean(test_scores, axis=1)
+# test_std = np.std(test_scores, axis=1)
+
+# plt.subplots(1, figsize=(10,10))
+# plt.plot(train_sizes, train_mean, '--', color="#111111",  label="Training score")
+# plt.plot(train_sizes, test_mean, color="#111111", label="Cross-validation score")
+
+# plt.fill_between(train_sizes, train_mean - train_std, train_mean + train_std, color="#DDDDDD")
+# plt.fill_between(train_sizes, test_mean - test_std, test_mean + test_std, color="#DDDDDD")
+
+# plt.title("Learning Curve")
+# plt.xlabel("Training Set Size"), plt.ylabel("Accuracy Score"), plt.legend(loc="best")
+# plt.tight_layout()
+# plt.show()
+
+  
+# 調整xgboost 的參數
+# param_dist = {
+#         'n_estimators':range(80,200,4),
+#         'max_depth':range(2,15,1),              # 常用[3~10]
+#         'learning_rate':np.linspace(0.01,2,20), # 取值範圍[0~1] 數值越小可找到更精確的值，但運算量更大
+#         'subsample':np.linspace(0.7,0.9,20),     # [0.5-1] 增加前次被判斷錯誤的樣本，使新的樹模型更容易抽中，加強學習
+#         'colsample_bytree':np.linspace(0.5,0.98,10), # 範圍[0-1], 典型[0.5-1]
+#         'min_child_weight':range(1,9,1)
+#         }
+param_1= {'n_estimators': range(287, 293, 1), 'max_depth': range(3, 7, 1)}
+param_2= {'learning_rate': np.linspace(0.45, 0.464, 10), 'subsample': np.linspace(0.945, 0.955, 10)}
+param_3= {'colsample_bytree': np.linspace(0.93, 0.94, 10), 'min_child_weight': range(4, 7, 1)}
+# grid_search = GridSearchCV(estimator = xgb.XGBRegressor(random_state=10), 
+# param_grid =param_1, cv= 10) 
+# 最佳參數組合： {'max_depth': 3, 'n_estimators': 288}
+# grid_search= GridSearchCV(estimator= xgb.XGBRegressor(n_estimators= 288, 
+# max_depth= 3, random_state= 10), param_grid= param_2, cv=10)
+# 最佳參數組合： {'learning_rate': 0.45467, 'subsample': 0.95167}
+# grid_search= GridSearchCV(estimator= xgb.XGBRegressor(n_estimators= 288, 
+# max_depth= 3, learning_rate= 0.45467, subsample= 0.95167,random_state= 10), param_grid= param_3, cv=10)
+# grid_search.fit(x_train, y_train)
+# print(f'Result: 最佳參數組合： {grid_search.best_params_},分數: {grid_search.best_score_}')
+# print(f'測試集分數: {grid_search.score(x_test, y_test)}')
+
+# kfold= 5
+xgboost= xgb.XGBRegressor(n_estimators= 285,max_depth= 3, learning_rate= 0.443, 
+subsample= 0.943, colsample_bytree= 0.9572, min_child_weight= 7)
+xgboost.fit(x_train, y_train)
+print(xgboost.score(x_test, y_test))
+
+# kfold= 10
+xgboost= xgb.XGBRegressor(n_estimators= 288, max_depth= 3, learning_rate= 0.45467, 
+subsample= 0.95167, colsample_bytree= 0.9356, min_child_weight= 5)
+xgboost.fit(x_train, y_train)
+xgboost.score(x_test, y_test)
+  
+# 使用KFold，評估xgboost的模型性能
+for k in range(5, 12, 1):
+    xgboost= xgb.XGBRegressor(n_estimators= 288, max_depth= 3, learning_rate= 0.45467, 
+subsample= 0.95167, colsample_bytree= 0.9356, min_child_weight= 5)
+    scores = cross_val_score(xgboost, x_train, y_train, cv=k, scoring='neg_mean_squared_error')
+    # 计算均方误差的平均值和标准差
+    mse_scores = -scores  # 因为cross_val_score返回的是负均方误差
+    mean_mse = mse_scores.mean()
+    std_mse = mse_scores.std()
+    print( f'k: {k}, 均方誤差: {mean_mse}, 標準差: {std_mse}')
+
