@@ -1,0 +1,188 @@
+import pandas as pd
+import numpy
+import copy
+import re
+from nltk.tokenize import word_tokenize
+import nltk
+nltk.download('punkt')
+nltk.download('stopwords')
+nltk.download('wordnet')
+import keras
+from nltk.corpus import stopwords
+from nltk.stem import PorterStemmer, WordNetLemmatizer
+from keras.preprocessing.text import Tokenizer
+from sklearn.model_selection import train_test_split
+from nltk.stem import SnowballStemmer
+from keras.models import Sequential
+from keras.layers import Embedding, SimpleRNN, Dense
+from nltk.stem import PorterStemmer, WordNetLemmatizer
+from keras.layers import Embedding, Conv1D, GlobalMaxPooling1D
+from keras.layers import LSTM, Dense, Embedding
+
+test = pd.read_csv('/kaggle/input/llm-detect-ai-generated-text/test_essays.csv')
+sub = pd.read_csv('/kaggle/input/llm-detect-ai-generated-text/sample_submission.csv')
+train = pd.read_csv('/kaggle/input/llm-detect-ai-generated-text/train_essays.csv')
+
+
+## Add new data
+add= pd.read_csv('/kaggle/input/llm-mistral-7b-instruct-texts/Mistral7B_CME_v7.csv')
+add_car= add[add['prompt_name']== 'Car-free cities']
+add_car.drop(columns= ['prompt_id', 'prompt_name'], inplace= True)
+
+add_elect= add[add['prompt_name']== 'Does the electoral college work?']
+add_elect.drop(columns= ['prompt_id', 'prompt_name'], inplace= True)
+
+train=  pd.concat([train, add_car, add_elect], ignore_index=True)
+### 文本資料前處理 ###
+def clean_text(text): 
+    text= re.sub(r'[^a-zA-Z]', ' ', text) ## 清除標點符號，只保留英文字母並統一為小寫
+    text= word_tokenize(text) ## 標記化，將文本切割成單詞或子詞 
+    text= [w.lower() for w in text if w.lower() not in stopwords.words('english')] ## 去掉停用詞，刪掉對語意沒什麼幫助的詞語
+#     print(text)
+    stemmer = SnowballStemmer("english")
+    text= [stemmer.stem(w) for w in text] ## 詞語提取，找到詞的原始形式（較激烈）
+    lemmatizer = WordNetLemmatizer()
+#     text= [lemmatizer.lemmatize(w) for w in text] ## 詞語提取，找到詞的原始形式（較保守）
+    return text
+
+train['text']= train['text'].apply(clean_text)
+### 將語料庫利用 Tokenizer建立字典，將文本化為數字序列 ###
+
+max_word= 30000  ## 最大字典量不超過此數字
+# def create_vocabulary(texts):
+tokenizer = Tokenizer(max_word)
+tokenizer.fit_on_texts(train['text'])
+# tokenizer.index_word[idx] 輸入數字可返回文字
+text_train= tokenizer.texts_to_sequences(train['text'])
+
+### Zero Padding 將每個文本的長度資料統一 ### 
+max_length = 500   # 長度超過此數字的即刪除， 原始長度不足的則在前面補 0
+text_train = keras.preprocessing.sequence.pad_sequences(text_train, maxlen= max_length)
+
+### 將label轉為 one-hot-encoding
+lab_train= keras.utils.to_categorical(train['generated'])
+
+### 將資料切格為訓練集與測試集 ###
+x_train, x_test, y_train, y_test =train_test_split(text_train, lab_train, test_size= 0.2, random_state= 9527)
+
+### 將測試資料前處理 ###
+test['text']= test['text'].apply(clean_text)
+text_test= tokenizer.texts_to_sequences(test['text'])
+text_test= keras.preprocessing.sequence.pad_sequences(text_test, maxlen= max_length)
+
+vocab_size = len(tokenizer.word_index) + 1
+timesteps = max_length
+embedding_dim = 100
+
+# 建立RNN & LSTM layer模型
+model = Sequential()
+model.add(Embedding(input_dim=vocab_size, output_dim=embedding_dim, input_length=timesteps))
+model.add(Conv1D(filters=64, kernel_size=3, activation='relu'))
+model.add(SimpleRNN(units=64, dropout=0.2, recurrent_dropout=0.2, return_sequences=True))  # 64個循環神經元
+model.add(LSTM(units=64, dropout=0.2, recurrent_dropout=0.2))
+model.add(Dense(units=2, activation='sigmoid'))  # 假設有2個類別，使用sigmoid激活函數
+
+# 編譯模型
+model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+
+# 打印模型概要
+model.summary()
+
+rnn= model.fit(x_train, y_train, batch_size= 20 ,epochs= 5, validation_data=(x_test, y_test))
+# loss, accuracy= model.evaluate(x_test, y_test)
+# print(f"Test Loss: {loss}, Test Accuracy: {accuracy}")
+predict= model.predict(text_test)[:,1]
+sub['generated']= predict
+sub.to_csv('submission.csv', index=False)
+
+------------------------------------------------------------------------------------------------------------------------------------
+
+### BERT 模型 ###
+
+from transformers import BertTokenizer, BertModel
+from transformers import BertTokenizer, BertForSequenceClassification, AdamW
+import torch.optim as optim
+from torch.utils.data import DataLoader, TensorDataset
+import torch
+
+#tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+#model = BertForSequenceClassification.from_pretrained('bert-base-uncased')
+#optimizer = optim.AdamW(model.parameters(), lr=5e-5)  # 這裡使用AdamW優化器，也可以選擇其他優化器
+
+text_input = tf.keras.layers.Input(shape=(), dtype=tf.string)
+preprocessor = tfhub.KerasLayer(
+    "https://kaggle.com/models/tensorflow/bert/frameworks/TensorFlow2/variations/en-uncased-preprocess/versions/3")
+encoder_inputs = preprocessor(text_input)
+encoder = tfhub.KerasLayer(
+    "https://www.kaggle.com/models/tensorflow/bert/frameworks/TensorFlow2/variations/bert-en-uncased-l-10-h-512-a-8/versions/2",
+    trainable=True)
+outputs = encoder(encoder_inputs)
+pooled_output = outputs["pooled_output"]      
+sequence_output = outputs["sequence_output"] 
+
+# dense_1 = tf.keras.layers.Dense(128 , activation='relu')(pooled_output)
+# dropout = tf.keras.layers.Dropout(0.7 , name="dropout1")(pooled_output)
+# dense_2 = tf.keras.layers.Dense(64 , activation='relu')(dropout)
+# dropout1 = tf.keras.layers.Dropout(0.5 , name="dropout2")(dense_2)
+# dense_3 = tf.keras.layers.Dense(16,activation='relu')(dropout1)
+
+# dense_out = tf.keras.layers.Dense(1 , activation='sigmoid', name='output')(dense_3)
+# model = tf.keras.Model(inputs=text_input, outputs=dense_out)
+
+# 加入自定義的分類層（fine-tuning）
+num_classes = 1
+classification_layer = Dense(num_classes, activation='sigmoid', name='classification')(pooled_output)
+
+model = tf.keras.Model(inputs=text_input, outputs=classification_layer)
+model.summary()
+
+
+model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate= 0.0001),
+              loss='binary_crossentropy',
+              metrics=["accuracy"])
+metric = 'val_accuracy'
+checkpoint_filepath = 'checkpoint.hdf5'
+callback_list = [tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_filepath, 
+                                                    monitor=metric,
+                                                    verbose=2,
+                                                    save_best_only=True,
+                                                    mode='max'), 
+                 tf.keras.callbacks.EarlyStopping(monitor=metric,
+                                                  patience=0,
+                                                  restore_best_weights=True)
+                ]
+
+## 訓練Bert模型 
+# history = model.fit(x_train, y_train , batch_size= 8, callbacks=[callback_list],
+#                     epochs=4 , validation_data=(x_test, y_test))
+
+# 進行迴圈 fine-tuning
+num_epochs = 1
+batch_size = 32
+
+for epoch in range(num_epochs):
+    for step in range(0, len(x_train), batch_size):
+        x_batch = x_train[step:step + batch_size]
+        y_batch = y_train[step:step + batch_size]
+
+        # 訓練模型
+        model.train_on_batch(x_batch, y_batch)
+
+    # 在每個 epoch 結束時可以加入額外的驗證或監視代碼
+    # 例如：計算驗證集上的準確度、儲存模型、等等
+    # validation_accuracy = ...
+#     _, training_accuracy = model.evaluate(x_train, y_train, verbose=0)
+#     print(f'Epoch {epoch + 1}/{num_epochs} - Training Accuracy: {training_accuracy}')
+#     _, acc = model.evaluate(x_test, y_test)
+#     print("Accuracy on Test data:",acc)
+
+model.save("my_model.keras")
+
+# loss , acc = model.evaluate(x_train, y_train)
+# print("Accuracy on Train data:",acc)
+# loss , acc = model.evaluate(x_test, y_test)
+# print("Accuracy on Test data:",acc)
+
+pred = model.predict(final_test)
+sub['generated']= pred[:, 0]
+sub.to_csv('submission.csv', index=False)
